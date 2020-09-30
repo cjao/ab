@@ -17,3 +17,9 @@ parameter.
                                                                                 
 `ab COMMAND`, where COMMAND is one of                                           
 `mount|umount|next-lv|snapshot|dnf|finalize|compare|cleanup`.   
+
+A typical usage would be something like
+```
+ab snapshot && ab dnf update && ab finalize
+```
+
