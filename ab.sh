@@ -29,13 +29,16 @@ esac
 current_lv_staging="${current_lv}_staging"
 next_lv_staging="${next_lv}_staging"
 
+current_lv_backup="${current_lv}_backup"
+next_lv_backup="${next_lv}_backup"
+
 echo "Current LV is $current_lv, next LV is $next_lv." >&3
 next_lv_mnt="/mnt/${next_lv}"
 
 print_usage()
 {
     echo "Usage: ab [-v] COMMAND"
-    echo "where COMMAND is one of mount|umount|next-lv|snapshot|dnf|finalize|compare|cleanup."
+    echo "where COMMAND is one of mount|umount|next-lv|backup|stage|dnf|finalize|compare|cleanup."
     echo "mount options:   -s"
     echo "cleanup options: -a"
     echo "compare options: --previous"
@@ -130,6 +133,8 @@ mount_next_lv()
 	echo "Error: unrecognized option $1." >&2
 	exit 1
     else
+	# next_lv is either the previous root or the finalized pending root.
+	# In either case, mount read-only to prevent accidental modification.
 	echo "Mounting /dev/$vg/next_lv read-only at $next_lv_mnt." >&3
 	if ! mount -o,ro /dev/$vg/$next_lv $next_lv_mnt; then
 	    echo "Error: could not mount LV $next_lv at $next_lv_mnt" >&2
@@ -179,12 +184,14 @@ compare_rpmdb()
 {
     test_uid
     prepare_mount_point
-    mount_next_lv
     rpm -qa | sort > /tmp/rpmdb_current
+
     if [ "$1" = "--previous" ]; then
+	mount_next_lv
 	rpm --dbpath $next_lv_mnt/var/lib/rpm -qa | sort > /tmp/rpmdb_previous
 	diff -u /tmp/rpmdb_previous /tmp/rpmdb_current
     else
+	mount_next_lv -s
 	rpm --dbpath $next_lv_mnt/var/lib/rpm -qa | sort > /tmp/rpmdb_next	
 	diff -u /tmp/rpmdb_current /tmp/rpmdb_next
     fi
@@ -208,6 +215,12 @@ cleanup()
 	if [ -L "/dev/$vg/$next_lv" ]; then
 	    lvremove -y $vg/$next_lv
 	fi
+	if [ -L "/dev/$vg/$next_lv_backup" ]; then
+	    lvremove -y $vg/$next_lv_backup
+	fi
+	if [ -L "/dev/$vg/$current_lv_backup" ]; then
+	    lvremove -y $vg/$current_lv_backup
+	fi	
     fi
 
 }
@@ -234,10 +247,15 @@ case $1 in
     next-lv)
 	echo $next_lv
 	;;
-    snapshot)
+    stage)
 	shift
 	prepare_mount_point
 	snapshot $current_lv $next_lv_staging
+	;;
+    backup)
+	shift
+	prepare_mount_point
+	snapshot $current_lv $current_lv_backup
 	;;
     dnf)
 	shift
