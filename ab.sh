@@ -32,16 +32,22 @@ next_lv_staging="${next_lv}_staging"
 current_lv_backup="${current_lv}_backup"
 next_lv_backup="${next_lv}_backup"
 
+current_lv_bootdir="/boot/snapshots/$current_lv"
+next_lv_bootdir="/boot/snapshots/$next_lv"
+
 echo "Current LV is $current_lv, next LV is $next_lv." >&3
 next_lv_mnt="/mnt/${next_lv}"
 
 print_usage()
 {
     echo "Usage: ab [-v] COMMAND"
-    echo "where COMMAND is one of mount|umount|next-lv|backup|stage|dnf|finalize|compare|cleanup."
+    echo "where COMMAND is one of mount|umount|next-lv|backup|stage"
+    echo "|dnf|finalize|compare|cleanup|backup-bootdir|kernels|initrds."
     echo "mount options:   -s"
     echo "cleanup options: -a"
     echo "compare options: --previous"
+    echo "boot-backup options: current|staging"
+    echo "kernels options: [rootdir]"
 }
 test_uid()
 {
@@ -225,6 +231,63 @@ cleanup()
 
 }
 
+kernels()
+{
+    root=$1
+    for k in $(ls $1/lib/modules); do
+	echo "vmlinuz-$k"
+    done
+}
+
+initrds()
+{
+    root=$1
+    for k in $(ls $1/lib/modules); do
+	echo "initramfs-$k.img"
+    done
+}
+
+# Preserves kernels and initrds tied to the current root.
+# Run this before a kernel upgrade in the staging root.
+# TODO: generate bootloader entries.
+
+backup_bootdir()
+{
+    test_uid
+    if ! [ -d $current_lv_bootdir ]; then
+	mkdir -p $current_lv_bootdir
+    fi
+    #Remove defunct kernels and initrds
+    for k in $(find $current_lv_bootdir -iname "vmlinuz*"); do
+	kernel=$(basename $k)
+	kernel_version=${kernel#vmlinuz-}
+	initrd="initramfs-$kernel_version.img"
+	if ! [ -d "/lib/modules/$kernel_version" ]; then
+	    rm $current_lv_bootdir/$kernel;
+	    rm $current_lv_bootdir/$initrd
+	    echo "Pruned obselete kernel $current_lv_bootdir/$kernel" >&3
+	    echo "Pruned obselete initrd $current_lv_bootdir/$initrd" >&3
+	fi
+    done
+    for k in $(kernels); do
+	if ! [ -f $current_lv_bootdir/$k ]; then
+	    if ! ln /boot/$k $current_lv_bootdir/$k; then
+		echo "Error: failed to hard-link /boot/$k to $current_lv_bootdir/$k" >&2
+		exit 1
+	    fi
+	    echo "Backed up /boot/$k to $current_lv_bootdir/$k" >&3
+	fi
+    done
+    for k in $(initrds); do
+	if ! [ -f $current_lv_bootdir/$k ]; then
+	    if ! ln /boot/$k $current_lv_bootdir/$k; then
+		echo "Error: failed to hard-link /boot/$k to $current_lv_bootdir/$k" >&2
+		exit 1
+	    fi
+	    echo "Backed up /boot/$k to $current_lv_bootdir/$k" >&3
+	fi
+    done
+}
 
 case $1 in
     -v)
@@ -267,6 +330,18 @@ case $1 in
     compare)
 	shift
 	compare_rpmdb $@
+	;;
+    kernels)
+	shift
+	kernels $@
+	;;
+    backup-bootdir)
+	shift
+	backup_bootdir $@
+	;;
+    initrds)
+	shift
+	initrds $@
 	;;
     cleanup)
 	shift
