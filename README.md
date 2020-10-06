@@ -15,11 +15,11 @@ parameter.
                                                                                 
 ### Usage:                                                                      
                                                                                 
-`ab COMMAND`, where COMMAND is one of                                           
-`mount|umount|next-lv|snapshot|dnf|finalize|compare|cleanup`.   
-
+`ab COMMAND`, where COMMAND is one of 
+`mount|umount|next-lv|backup|stage
+|dnf|finalize|compare|cleanup|backup-bootdir|kernels|initrds`
 A typical usage would be something like
 ```
-ab snapshot && ab dnf update && ab finalize
+ab backup-bootdir && ab stage && ab dnf update && ab finalize
 ```
 
