@@ -9,6 +9,8 @@ current_subvol_full=${current_subvol_full#/}
 current_subvol_short=${current_subvol_full#$subvol_base/}
 
 # TODO: allow more than two rootfs
+num_revisions=2
+
 subvol_short0="root0"
 subvol_short1="root1"
 
@@ -16,35 +18,42 @@ subvol_short1="root1"
 exec 3>/dev/null
 
 
+next_subvol_short=""
+
 # TODO: Allow more than 2 versions
-case "$current_subvol_short" in
-    "$subvol_short0")
-	next_subvol_short="$subvol_short1"
-	;;
-    "$subvol_short1")
-	next_subvol_short="$subvol_short0"
-	;;
-    *)
-	"Error: could not recognize mounted subvolume $current_subvol_short."
-	exit 1
-esac
 
-next_subvol_full=$subvol_base/$next_subvol_short
+init_vars()
+{
+    if [ -z "$next_subvol_short" ]; then
 
+	case "$current_subvol_short" in
+	    ''|*[!0-9]*)
+		echo "Error: could not recognize mounted subvolume $current_subvol_short" >&2
+		exit 1
+		;;
+	    *)
+		next_subvol_number=current_subvol_short+1
+		next_subvol_short=$((next_subvol_number%num_revisions))
+		;;
+	esac
+    fi
 
-current_subvol_short_staging="${current_subvol_short}_staging"
-next_subvol_short_staging="${next_subvol_short}_staging"
+    next_subvol_full=$subvol_base/$next_subvol_short
 
-current_subvol_short_backup="${current_subvol_short}_backup"
-next_subvol_short_backup="${next_subvol_short}_backup"
+    current_subvol_short_staging="${current_subvol_short}_staging"
+    next_subvol_short_staging="${next_subvol_short}_staging"
 
-current_subvol_short_bootdir="/boot/snapshots/$current_subvol_short"
-next_subvol_short_bootdir="/boot/snapshots/$next_subvol_short"
+    current_subvol_short_backup="${current_subvol_short}_backup"
+    next_subvol_short_backup="${next_subvol_short}_backup"
 
-echo "Current subvol is $current_subvol_short, next subvol is $next_subvol_short." >&3
-snapshot_mnt="/mnt/.snapshots"
-next_subvol_short_staging_mnt="$snapshot_mnt/$next_subvol_short_staging"
+    current_subvol_short_bootdir="/boot/snapshots/$current_subvol_short"
+    next_subvol_short_bootdir="/boot/snapshots/$next_subvol_short"
 
+    echo "Current subvol is $current_subvol_short, next subvol is $next_subvol_short." >&3
+    snapshot_mnt="/mnt/.snapshots"
+    next_subvol_short_staging_mnt="$snapshot_mnt/$next_subvol_short_staging"
+
+}
 print_usage()
 {
     echo "Usage: ab [-v] COMMAND"
@@ -178,6 +187,9 @@ cleanup_staging_bind_mounts()
 {
     test_uid
     for d in boot dev proc sys; do
+	if ! findmnt $next_subvol_short_staging_mnt/$d > /dev/null; then
+	    continue
+	fi
 	if ! umount -R $next_subvol_short_staging_mnt/$d; then
 	    echo "Error: failed to unmount $next_subvol_short_staging_mnt/$d." >&2
 	    exit 1
@@ -340,6 +352,18 @@ case $1 in
     *)
 	;;
 esac
+
+case $1 in
+    -n)
+	shift
+	next_subvol_short=$1
+	shift
+	;;
+    *)
+    ;;
+esac
+
+init_vars
 
 case $1 in
     mount)
