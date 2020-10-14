@@ -14,13 +14,12 @@ num_revisions=2
 subvol_short0="root0"
 subvol_short1="root1"
 
-
 exec 3>/dev/null
 
 
 next_subvol_short=""
 
-# TODO: Allow more than 2 versions
+# TODO: allow more than 2 versions
 
 init_vars()
 {
@@ -40,8 +39,8 @@ init_vars()
 
     next_subvol_full=$subvol_base/$next_subvol_short
 
-    current_subvol_short_staging="${current_subvol_short}_staging"
-    next_subvol_short_staging="${next_subvol_short}_staging"
+#    current_subvol_short_staging="${current_subvol_short}_staging"
+#    next_subvol_short_staging="${next_subvol_short}_staging"
 
     current_subvol_short_backup="${current_subvol_short}_backup"
     next_subvol_short_backup="${next_subvol_short}_backup"
@@ -51,7 +50,7 @@ init_vars()
 
     echo "Current subvol is $current_subvol_short, next subvol is $next_subvol_short." >&3
     snapshot_mnt="/mnt/.snapshots"
-    next_subvol_short_staging_mnt="$snapshot_mnt/$next_subvol_short_staging"
+    next_subvol_short_mnt="$snapshot_mnt/$next_subvol_short"
 
 }
 print_usage()
@@ -176,8 +175,8 @@ prepare_staging_bind_mounts()
 {
     test_uid
     for d in boot dev proc sys; do
-	if ! mount --bind /$d $next_subvol_short_staging_mnt/$d; then
-	    echo "Error: failed to bind-mount /$d to $next_subvol_short_staging_mnt/$d." >&2
+	if ! mount --bind /$d $next_subvol_short_mnt/$d; then
+	    echo "Error: failed to bind-mount /$d to $next_subvol_short_mnt/$d." >&2
 	    exit 1
 	fi
     done
@@ -187,11 +186,11 @@ cleanup_staging_bind_mounts()
 {
     test_uid
     for d in boot dev proc sys; do
-	if ! findmnt $next_subvol_short_staging_mnt/$d > /dev/null; then
+	if ! findmnt $next_subvol_short_mnt/$d > /dev/null; then
 	    continue
 	fi
-	if ! umount -R $next_subvol_short_staging_mnt/$d; then
-	    echo "Error: failed to unmount $next_subvol_short_staging_mnt/$d." >&2
+	if ! umount -R $next_subvol_short_mnt/$d; then
+	    echo "Error: failed to unmount $next_subvol_short_mnt/$d." >&2
 	    exit 1
 	fi
     done
@@ -203,8 +202,8 @@ run_dnf_transaction()
     test_uid
     mount_snapshots
     prepare_staging_bind_mounts
-    echo "Running \"dnf $@\" in root $next_subvol_short_staging_mnt." >&3
-    if dnf --installroot=$next_subvol_short_staging_mnt --releasever=32 $@; then
+    echo "Running \"dnf $@\" in root $next_subvol_short_mnt." >&3
+    if dnf --installroot=$next_subvol_short_mnt --releasever=32 $@; then
 	echo "dnf operation succeeded." >&3
 	cleanup_staging_bind_mounts
     else
@@ -219,16 +218,14 @@ prepare_next_boot()
 {
     test_uid
     echo "Editing fstab." >&3
-    if ! sed -i.bak "s|subvol=$current_subvol_full|subvol=$next_subvol_full|" $next_subvol_short_staging_mnt/etc/fstab; then
-       echo "Error: could not edit fstab of $next_subvol_short_staging." >&2
+    if ! sed -i.bak "s|subvol=$current_subvol_full|subvol=$next_subvol_full|" $next_subvol_short_mnt/etc/fstab; then
+       echo "Error: could not edit fstab of $next_subvol_short." >&2
        exit 1
     fi
 
-    snapshot $next_subvol_short_staging $next_subvol_short
-    cleanup
-    edit_grubenv $current_subvol_full $next_subvol_full
+#    cleanup
     unmark_staging $next_subvol_short
-    
+    edit_grubenv $current_subvol_full $next_subvol_full
 }
 
 rollback_boot()
@@ -239,6 +236,11 @@ rollback_boot()
     if ! [ -d "$snapshot_mnt/$next_subvol_short" ]; then
 	echo "Error: subvolume $next_subvol_full does not exist."
 	exit 1
+    fi
+
+    if ! [ -f "$snapshot_mnt/$next_subvol_short/.staging" ]; then
+	echo "Error: subvolume $next_subvol_full has not been finalized."
+	exit
     fi
     echo "Switching root subvol for next boot to $next_subvol_full."
     edit_grubenv $current_subvol_full $next_subvol_full 
@@ -257,12 +259,30 @@ cleanup()
 {
     test_uid
     mount_snapshots
-    btrfs sub delete $snapshot_mnt/*_staging
+
+    for d in $(ls $snapshot_mnt); do
+	if [ -f $snapshot_mnt/$d/.staging ]; then
+	    echo "Deleting staging subvolume $d"
+	    btrfs sub delete $snapshot_mnt/$d
+	fi
+    done
 
     if [ "$1" = "-a" ]; then
+	# Reset grubenv.
 	edit_grubenv $next_subvol_full $current_subvol_full
-	btrfs sub delete $snapshot_mnt/$next_subvol_short
-	btrfs sub delete $snapshot_mnt/*_backup
+
+	for d in $(ls $snapshot_mnt); do
+	    case $d in
+		''|*[!0-9]*)
+		    continue
+		    ;;
+		*)
+		    if [ "$d" != "$current_subvol_short" ]; then
+			btrfs sub delete $snapshot_mnt/$d
+		    fi
+		    ;;
+	    esac
+	done
     fi
 
     # if [ -d "$snapshot_mnt/$next_subvol_short_staging" ]; then
@@ -380,8 +400,8 @@ case $1 in
     stage)
 	shift
 	mount_snapshots
-	snapshot $current_subvol_short $next_subvol_short_staging
-	mark_staging $next_subvol_short_staging
+	snapshot $current_subvol_short $next_subvol_short
+	mark_staging $next_subvol_short
 	;;
     backup)
 	shift
