@@ -4,7 +4,7 @@
 
 subvol_base="snapshots/root"
 blockdev="/dev/sda3" # Source this at runtime
-current_subvol_full=$(findmnt -n -o SOURCE / | sed 's|.*\[\(.*\)\]|\1|')
+current_subvol_full=$(findmnt -n -o FSROOT /)
 current_subvol_full=${current_subvol_full#/}
 current_subvol_short=${current_subvol_full#$subvol_base/}
 
