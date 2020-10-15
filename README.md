@@ -2,8 +2,8 @@
 Script for performing dnf operations out-of-band with an a/b root               
 partition setup.                                                                
                                                                                 
-This is currently implemented using lvm thin snapshots but can be               
-easily adapted to btrfs root partitions.                                        
+This is currently implemented using either lvm thin snapshots or
+btrfs snapshots.
                                                                                 
 ## Notes:                                                                       
 - This is a *rough* proof of concept; for instance, LV and VG names are         
@@ -16,8 +16,7 @@ parameter.
 ### Usage:                                                                      
                                                                                 
 `ab COMMAND`, where COMMAND is one of 
-`mount|umount|next-lv|backup|stage
-|dnf|finalize|compare|cleanup|backup-bootdir|kernels|initrds`
+`mount|umount|stage|dnf|finalize|compare|cleanup|kernels|initrds`
 A typical usage would be something like
 ```
 ab stage && ab dnf update && ab finalize
