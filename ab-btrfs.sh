@@ -2,8 +2,12 @@
 
 # This script assumes that your root is mounted at vg0/wsroot[0,1].
 
+source /etc/default/grub
+
+releasever=$(grep VERSION_ID /etc/os-release | sed 's|VERSION_ID=||')
+machineid=$(cat /etc/machine-id)
 subvol_base="snapshots/root"
-blockdev="/dev/sda3" # Source this at runtime
+uuid=$(findmnt -n -o UUID /)
 current_subvol_full=$(findmnt -n -o FSROOT /)
 current_subvol_full=${current_subvol_full#/}
 current_subvol_short=${current_subvol_full#$subvol_base/}
@@ -86,6 +90,8 @@ snapshot()
     fi
 
     if [ -d $snapshot_mnt/$subvol_snap ]; then
+	# Prune defunct bootloader entries
+	rm /boot/loader/entries/*-$subvol_snap-rollback.conf 2> /dev/null
 	if ! btrfs sub delete $snapshot_mnt/$subvol_snap; then
 	    echo "Error: unable to delete existing snapshot $snapshot_mnt/$subvol_snap." >&2
 	    exit 1
@@ -163,7 +169,7 @@ mount_snapshots()
     fi
 
     if [ "$1" != "-u" ]; then
-	if ! mount $blockdev -o subvol=$subvol_base $snapshot_mnt; then
+	if ! mount -U $uuid -o subvol=$subvol_base $snapshot_mnt; then
 	    echo "Error: failed to mount subvolume $subvol_base to $snapshot_mnt." >Y&2
 	    exit 1
 	fi
@@ -234,16 +240,23 @@ rollback_boot()
     echo "WARNING: experimental."
     mount_snapshots
     if ! [ -d "$snapshot_mnt/$next_subvol_short" ]; then
-	echo "Error: subvolume $next_subvol_full does not exist."
+	echo "Error: subvolume $next_subvol_full does not exist." >&2
 	exit 1
     fi
 
-    if ! [ -f "$snapshot_mnt/$next_subvol_short/.staging" ]; then
-	echo "Error: subvolume $next_subvol_full has not been finalized."
-	exit
+    if  [ -f "$snapshot_mnt/$next_subvol_short/.staging" ]; then
+	echo "Error: subvolume $next_subvol_full has not been finalized." >&2
+	exit 1
     fi
     echo "Switching root subvol for next boot to $next_subvol_full."
-    edit_grubenv $current_subvol_full $next_subvol_full 
+    if ! ls /boot/loader/entries/*-$next_subvol_short-rollback.conf 2> /dev/null; then
+	echo "Error: No rollback entries." >&2
+	exit 1
+    fi
+    for e in $(ls /boot/loader/entries/*-$next_subvol_short-rollback.conf); do
+	sed -e 's|rollback.*||' $e > ${e%-rollback.conf}.conf
+    done
+#    edit_grubenv $current_subvol_full $next_subvol_full 
 }
 
 compare_rpmdb()
@@ -270,6 +283,9 @@ cleanup()
     if [ "$1" = "-a" ]; then
 	# Reset grubenv.
 	edit_grubenv $next_subvol_full $current_subvol_full
+
+	# Delete rollback bootloader entries
+	rm /boot/loader/entries/*-rollback.conf 2> /dev/null
 
 	for d in $(ls $snapshot_mnt); do
 	    case $d in
@@ -308,7 +324,6 @@ cleanup()
 
 kernels()
 {
-    root=$1
     for k in $(ls $1/lib/modules); do
 	echo "vmlinuz-$k"
     done
@@ -316,10 +331,23 @@ kernels()
 
 initrds()
 {
-    root=$1
     for k in $(ls $1/lib/modules); do
 	echo "initramfs-$k.img"
     done
+}
+
+generate_bls_snippet()
+{
+    kversion=$1
+    rel_bootdir=${current_subvol_short_bootdir#/boot}
+    echo "title Fedora ($kversion) $releasever rollback-$current_subvol_short"
+    echo "version $kversion"
+    echo "linux $rel_bootdir/vmlinuz-$kversion"
+    echo "initrd $rel_bootdir/initramfs-$kversion.img"
+    echo "options root=UUID=$uuid ro rootflags=subvol=$current_subvol_full $GRUB_CMDLINE_LINUX"
+    echo "grub_users \$grub_users"
+    echo "grub_arg --unrestricted"
+    echo "grub_class kernel"
 }
 
 # Preserves kernels and initrds tied to the current root.
@@ -344,7 +372,12 @@ backup_bootdir()
 	    echo "Pruned obselete initrd $current_subvol_short_bootdir/$initrd" >&3
 	fi
     done
-    for k in $(kernels); do
+
+    for kversion in $(ls /lib/modules); do
+	k="vmlinuz-$kversion"
+	i="initramfs-${kversion}.img"
+	blsname="$kversion-$current_subvol_short-rollback.conf"
+
 	if ! [ -f $current_subvol_short_bootdir/$k ]; then
 	    if ! ln /boot/$k $current_subvol_short_bootdir/$k; then
 		echo "Error: failed to hard-link /boot/$k to $current_subvol_short_bootdir/$k" >&2
@@ -352,14 +385,20 @@ backup_bootdir()
 	    fi
 	    echo "Backed up /boot/$k to $current_subvol_short_bootdir/$k" >&3
 	fi
-    done
-    for k in $(initrds); do
-	if ! [ -f $current_subvol_short_bootdir/$k ]; then
-	    if ! ln /boot/$k $current_subvol_short_bootdir/$k; then
-		echo "Error: failed to hard-link /boot/$k to $current_subvol_short_bootdir/$k" >&2
+
+	if ! [ -f $current_subvol_short_bootdir/$i ]; then
+	    if ! ln /boot/$i $current_subvol_short_bootdir/$i; then
+		echo "Error: failed to hard-link /boot/$i to $current_subvol_short_bootdir/$i" >&2
 		exit 1
 	    fi
-	    echo "Backed up /boot/$k to $current_subvol_short_bootdir/$k" >&3
+	    echo "Backed up /boot/$i to $current_subvol_short_bootdir/$i" >&3
+	fi
+
+	if ! generate_bls_snippet $kversion > /boot/loader/entries/$blsname; then
+	    echo "Error: failed to generate bootloader entry for kernel $kversion" >&2
+	    exit 1
+	else
+	    echo "Generated boot loader entry /boot/loader/entries/$blsname" >&3
 	fi
     done
 }
@@ -399,6 +438,7 @@ case $1 in
 	;;
     stage)
 	shift
+	backup_bootdir
 	mount_snapshots
 	snapshot $current_subvol_short $next_subvol_short
 	mark_staging $next_subvol_short
@@ -430,6 +470,10 @@ case $1 in
     initrds)
 	shift
 	initrds $@
+	;;
+    generate-bls)
+	shift
+	generate_bls_snippet $@
 	;;
     cleanup)
 	shift

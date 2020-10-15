@@ -20,6 +20,6 @@ parameter.
 |dnf|finalize|compare|cleanup|backup-bootdir|kernels|initrds`
 A typical usage would be something like
 ```
-ab backup-bootdir && ab stage && ab dnf update && ab finalize
+ab stage && ab dnf update && ab finalize
 ```
 
