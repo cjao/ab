@@ -132,14 +132,13 @@ unmark_staging()
     fi
 }
 
-edit_grubenv()
+edit_kernelopts()
 {
     test_uid
     subvol=$1
     subvol_new=$2
     grubenv="/boot/efi/EFI/fedora/grubenv"
     grubenv_new=${grubenv}_new
-    
     
     sed "s|$subvol|$subvol_new|" $grubenv > $grubenv_new
     if [ -f $grubenv_new ]; then
@@ -148,6 +147,26 @@ edit_grubenv()
 	echo "Error: could not write new grub configuration to $grubenv_new." >&2
 	exit 1
     fi
+
+    # Fedora 33 writes /proc/cmdline directly to the grub configuration files instead of
+    # reading $kernelopts from grubenv
+    for f in $(ls /boot/loader/entries); do
+	case $f in
+	    *rollback*)
+		continue
+		;;
+	    *)
+		sed "s|$subvol|$subvol_new|" /boot/loader/entries/$f > /boot/loader/entries/${f}.new
+		if [ -f /boot/loader/entries/${f}.new ]; then
+		    mv /boot/loader/entries/${f}.new /boot/loader/entries/$f
+		else
+		    echo "Error: could not modify grub entry /boot/loader/entries/$f"
+		    exit 1
+		fi
+		;;
+	esac
+    done
+    
 }
 
 
@@ -228,7 +247,7 @@ prepare_next_boot()
 
 #    cleanup
     unmark_staging $next_subvol_short
-    edit_grubenv $current_subvol_full $next_subvol_full
+    edit_kernelopts $current_subvol_full $next_subvol_full
 }
 
 rollback_boot()
@@ -237,7 +256,7 @@ rollback_boot()
     echo "Error: unimplemented"
 
 
-#    edit_grubenv $current_subvol_full $next_subvol_full 
+#    edit_kernelopts $current_subvol_full $next_subvol_full 
 }
 
 compare_rpmdb()
@@ -263,7 +282,7 @@ cleanup()
 
     if [ "$1" = "-a" ]; then
 	# Reset grubenv.
-	edit_grubenv $next_subvol_full $current_subvol_full
+	edit_kernelopts $next_subvol_full $current_subvol_full
 
 	# Delete rollback bootloader entries
 	rm /boot/loader/entries/*-rollback-*.conf 2> /dev/null
