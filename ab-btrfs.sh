@@ -15,9 +15,6 @@ current_subvol_short=${current_subvol_full#$subvol_base/}
 # TODO: allow more than two rootfs
 num_revisions=2
 
-subvol_short0="root0"
-subvol_short1="root1"
-
 exec 3>/dev/null
 
 
@@ -91,7 +88,7 @@ snapshot()
 
     if [ -d $snapshot_mnt/$subvol_snap ]; then
 	# Prune defunct bootloader entries
-	rm /boot/loader/entries/*-$subvol_snap-rollback.conf 2> /dev/null
+	# rm /boot/loader/entries/*-rollback.conf 2> /dev/null
 	if ! btrfs sub delete $snapshot_mnt/$subvol_snap; then
 	    echo "Error: unable to delete existing snapshot $snapshot_mnt/$subvol_snap." >&2
 	    exit 1
@@ -237,25 +234,9 @@ prepare_next_boot()
 rollback_boot()
 {
     test_uid
-    echo "WARNING: experimental."
-    mount_snapshots
-    if ! [ -d "$snapshot_mnt/$next_subvol_short" ]; then
-	echo "Error: subvolume $next_subvol_full does not exist." >&2
-	exit 1
-    fi
+    echo "Error: unimplemented"
 
-    if  [ -f "$snapshot_mnt/$next_subvol_short/.staging" ]; then
-	echo "Error: subvolume $next_subvol_full has not been finalized." >&2
-	exit 1
-    fi
-    echo "Switching root subvol for next boot to $next_subvol_full."
-    if ! ls /boot/loader/entries/*-$next_subvol_short-rollback.conf 2> /dev/null; then
-	echo "Error: No rollback entries." >&2
-	exit 1
-    fi
-    for e in $(ls /boot/loader/entries/*-$next_subvol_short-rollback.conf); do
-	sed -e 's|rollback.*||' $e > ${e%-rollback.conf}.conf
-    done
+
 #    edit_grubenv $current_subvol_full $next_subvol_full 
 }
 
@@ -285,7 +266,7 @@ cleanup()
 	edit_grubenv $next_subvol_full $current_subvol_full
 
 	# Delete rollback bootloader entries
-	rm /boot/loader/entries/*-rollback.conf 2> /dev/null
+	rm /boot/loader/entries/*-rollback-*.conf 2> /dev/null
 
 	for d in $(ls $snapshot_mnt); do
 	    case $d in
@@ -373,10 +354,11 @@ backup_bootdir()
 	fi
     done
 
+    let "j=0"
     for kversion in $(ls /lib/modules); do
 	k="vmlinuz-$kversion"
 	i="initramfs-${kversion}.img"
-	blsname="$kversion-$current_subvol_short-rollback.conf"
+	blsname="$machineid-rollback-$j.conf"
 
 	if ! [ -f $current_subvol_short_bootdir/$k ]; then
 	    if ! ln /boot/$k $current_subvol_short_bootdir/$k; then
@@ -400,6 +382,7 @@ backup_bootdir()
 	else
 	    echo "Generated boot loader entry /boot/loader/entries/$blsname" >&3
 	fi
+	let "j+=1"
     done
 }
 
