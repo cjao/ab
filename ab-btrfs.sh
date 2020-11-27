@@ -225,7 +225,7 @@ run_dnf_transaction()
     mount_snapshots
     prepare_staging_bind_mounts
     echo "Running \"dnf $@\" in root $next_subvol_short_mnt." >&3
-    if dnf --installroot=$next_subvol_short_mnt --releasever=32 $@; then
+    if dnf --installroot=$next_subvol_short_mnt --releasever=$releasever $@; then
 	echo "dnf operation succeeded." >&3
 	cleanup_staging_bind_mounts
     else
